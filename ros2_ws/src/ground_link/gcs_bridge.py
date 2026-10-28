@@ -16,7 +16,7 @@ from ai_msgs.msg import AiHealth, Detection
 class GcsBridge(Node):
     def __init__(self):
         super().__init__("gcs_bridge")
-        self.declare_parameter("gcs_ip", "192.168.10.10")   # 地面站 IP(图传通后固定)
+        self.declare_parameter("gcs_ips", ["192.168.10.10"])  # 多端接入: Qt/手机APP/Web 并行
         self.declare_parameter("gcs_port", 14555)
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.state, self.vfr, self.bat, self.odom, self.ai = {}, {}, {}, {}, {}
@@ -43,12 +43,12 @@ class GcsBridge(Node):
         pkt = {"t": self.get_clock().now().nanoseconds, "state": self.state,
                "vfr": self.vfr, "bat": self.bat, "odom": self.odom, "ai": self.ai,
                "det": getattr(self, "det", None)}
-        try:
-            self.sock.sendto(json.dumps(pkt).encode(),
-                             (self.get_parameter("gcs_ip").value,
-                              self.get_parameter("gcs_port").value))
-        except OSError:
-            pass
+        data = json.dumps(pkt).encode()
+        for ip in self.get_parameter("gcs_ips").value:        # 多端广播
+            try:
+                self.sock.sendto(data, (ip, self.get_parameter("gcs_port").value))
+            except OSError:
+                pass
 
 
 def main(args=None):

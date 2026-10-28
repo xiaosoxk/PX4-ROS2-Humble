@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>无人机 Web 地面站 — PX4 + ROS2</title>
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<style>
+  body { margin:0; background:#0e2230; color:#cfe3ea; font-family:"Microsoft YaHei",sans-serif; }
+  #grid { display:grid; grid-template-columns: 2fr 1fr; grid-template-rows: 300px 1fr; gap:8px; padding:8px; height:100vh; box-sizing:border-box; }
+  .panel { background:#162235; border:1px solid #1b6b7a; border-radius:8px; padding:8px; overflow:auto; }
+  .panel h3 { margin:0 0 6px; font-size:14px; color:#37dcf2; }
+  #video { width:100%; height:100%; object-fit:contain; background:#000; border-radius:6px; }
+  #map3d { width:100%; height:calc(100vh - 330px); }
+  table { width:100%; font-size:12px; border-collapse:collapse; }
+  td,th { border-bottom:1px solid #234; padding:3px 6px; text-align:left; }
+  input { background:#0e2230; color:#cfe3ea; border:1px solid #1b6b7a; border-radius:4px; padding:3px 6px; width:80px; }
+  button { background:#1b6b7a; color:#fff; border:0; border-radius:6px; padding:6px 14px; cursor:pointer; margin:4px 2px; }
+  button:hover { background:#2390a5; }
+  #tele div { font-size:13px; line-height:1.7; }
+  .bad { color:#ff8a9a; } .good { color:#7fe3a8; }
+</style>
+</head>
+<body>
+<div id="grid">
+  <div class="panel"><h3>实时视频（H.265 链路 / MJPEG 演示流，AI 识别框叠加）</h3>
+    <img id="video" src="/video" alt="video">
+  </div>
+  <div class="panel"><h3>遥测 / AI 链路</h3><div id="tele">连接中…</div></div>
+  <div class="panel"><h3>三维地图（Octomap 占据 + 飞行轨迹 + 航点任务）</h3><div id="map3d"></div></div>
+  <div class="panel">
+    <h3>任务在线编辑 / 参数调参 / 日志</h3>
+    <table id="wps"><tr><th>北向 m</th><th>东向 m</th><th>高度 m</th></tr></table>
+    <button onclick="addWp()">加航点</button>
+    <button onclick="sendMission()">下发任务</button>
+    <button onclick="clearWps()">清空</button>
+    <h3 style="margin-top:8px">参数（机载 params 热更新）</h3>
+    <div>
+      max_vh <input id="p_vh" value="10"> &nbsp; conf_thres <input id="p_conf" value="0.45"><br>
+      target_distance <input id="p_td" value="8"> &nbsp;
+      <button onclick="sendParams()">下发参数</button>
+      <button onclick="loadLogs()">刷新日志列表</button>
+    </div>
+    <div id="logs" style="font-size:12px;margin-top:6px"></div>
+  </div>
+</div>
+
+<script>
+/* ---------------- 遥测轮询（20Hz） ---------------- */
+const teleEl = document.getElementById("tele");
+const traj = [];      // {x,y,z}
+let octoBoxes = [];
+
+function poll() {
+  fetch("/api/tele").then(r => r.json()).then(j => {
+    if (!j.raw) { teleEl.innerHTML = "等待机载遥测…"; return; }
+    const t = JSON.parse(j.raw);
+    const v = t.vfr || {}, b = t.bat || {}, st = t.state || {}, ai = t.ai || {}, o = t.odom || {}, d = t.det;
+    const worst = Math.max(0, ...Object.values(ai).map(v => v.st || 0));
+    const aiTxt = Object.keys(ai).length
+        ? (worst === 0 ? '<span class="good">正常</span>' : worst === 1 ? '<span style="color:#ffd47f">降级</span>' : '<span class="bad">熔断</span>')
+        : "--";
+    teleEl.innerHTML =
+      `模式 <b>${st.mode || "--"}</b> ${st.armed ? "已解锁" : "未解锁"}<br>` +
+      `高度 ${(+v.alt || 0).toFixed(1)} m &nbsp; 速度 ${(+v.spd || 0).toFixed(1)} m/s<br>` +
+      `电量 ${((b.pct || 0) * 100).toFixed(0)}% (${(b.v || 0).toFixed(1)}V)<br>` +
+      `AI 链路 ${aiTxt} &nbsp; 识别 ${d ? `cls${d.cls} ${(d.conf * 100).toFixed(0)}%` : "无"}<br>` +
+      Object.entries(ai).map(([k, v]) => `${k}: ${v.ms.toFixed(1)}ms`).join(" | ");
+    if ("x" in o) {
+      traj.push({ x: o.x, y: o.y, z: o.z });
+      if (traj.length > 3000) traj.shift();
+      updateTraj();
+    }
+    updateOctomap(t.octo || null);
+  }).catch(() => { teleEl.innerHTML = '<span class="bad">链路断开</span>'; });
+}
+setInterval(poll, 50);
+
+/* ---------------- 三维地图：three.js（轨迹 + 航点 + Octomap 体素） ---------------- */
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0e2230);
+const camera = new THREE.PerspectiveCamera(60, 1.6, 0.1, 2000);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+document.getElementById("map3d").appendChild(renderer.domElement);
+scene.add(new THREE.GridHelper(400, 40, 0x1b6b7a, 0x12303a));
+const trajGeom = new THREE.BufferGeometry();
+const trajLine = new THREE.Line(trajGeom, new THREE.LineBasicMaterial({ color: 0x37dcf2 }));
+scene.add(trajLine);
+const drone = new THREE.Mesh(new THREE.ConeGeometry(1.2, 3, 6),
+                             new THREE.MeshBasicMaterial({ color: 0xffd47f }));
+scene.add(drone);
+let wpMeshes = [], octoMesh = null;
+
+function updateTraj() {
+  if (!traj.length) return;
+  const p = traj[traj.length - 1];
+  drone.position.set(p.y, -p.z, p.x);            // NED → three.js (x东, y上, z北)
+  trajGeom.setFromPoints(traj.map(q => new THREE.Vector3(q.y, -q.z, q.x)));
+}
+
+function updateOctomap(cells) {                   // cells: [[x,y,z,size],...] 机载 octomap 抽样
+  if (!cells || !cells.length) return;
+  if (octoMesh) scene.remove(octoMesh);
+  const geo = new THREE.BoxGeometry(1, 1, 1);
+  octoMesh = new THREE.InstancedMesh(geo,
+      new THREE.MeshBasicMaterial({ color: 0x1b6b7a, transparent: true, opacity: 0.5 }), cells.length);
+  const m = new THREE.Matrix4();
+  cells.forEach((c, i) => {
+    m.makeTranslation(c[1], -c[2], c[0]);
+    octoMesh.setMatrixAt(i, m);
+  });
+  scene.add(octoMesh);
+}
+
+function resize() {
+  const el = document.getElementById("map3d");
+  camera.aspect = el.clientWidth / el.clientHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(el.clientWidth, el.clientHeight);
+}
+window.addEventListener("resize", resize); resize();
+(function animate() {
+  requestAnimationFrame(animate);
+  camera.lookAt(drone.position);
+  renderer.render(scene, camera);
+})();
+
+/* ---------------- 任务编辑 / 参数 / 日志 ---------------- */
+function addWp() {
+  const tb = document.getElementById("wps").insertRow(-1);
+  for (let i = 0; i < 3; i++) tb.insertCell(i).appendChild(Object.assign(document.createElement("input")));
+}
+function clearWps() { document.getElementById("wps").innerHTML = "<tr><th>北向 m</th><th>东向 m</th><th>高度 m</th></tr>"; }
+function sendMission() {
+  const rows = [...document.getElementById("wps").rows].slice(1);
+  const wps = rows.map(r => [+r.cells[0].firstChild.value || 0,
+                             +r.cells[1].firstChild.value || 0,
+                             +r.cells[2].firstChild.value || 15]);
+  fetch("/api/mission", { method: "POST", body: JSON.stringify({ waypoints: wps }) })
+    .then(r => r.json()).then(j => alert(`任务已下发 ${j.n} 个航点`));
+}
+function sendParams() {
+  fetch("/api/params", { method: "POST", body: JSON.stringify({ params: {
+      max_vh: +document.getElementById("p_vh").value,
+      conf_thres: +document.getElementById("p_conf").value,
+      target_distance: +document.getElementById("p_td").value } }) })
+    .then(() => alert("参数已下发（经安全校验后生效）"));
+}
+function loadLogs() {
+  fetch("/api/logs").then(r => r.json()).then(j => {
+    document.getElementById("logs").innerHTML = "日志: " + (j.logs.join(", ") || "无");
+  });
+}
+loadLogs();
+</script>
+</body>
+</html>

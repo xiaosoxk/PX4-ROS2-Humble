@@ -16,9 +16,18 @@
     # ---- follow_me ----
     target_distance: 8.0
     min_distance: 5.0
+    # ---- planner_bridge ----
+    cruise_vh: 4.0
+    cruise_alt_min: 15.0
+    replan_hz: 10.0
+    # ---- obstacle_send (PX4 碰撞预防) ----
+    cp_dist_m: 2.5
+    # ---- video_encoder ----
+    bitrate_kbps: 12000
+    eis: false
     # ---- gimbal ----
     port: /dev/ttyTHS1
     mode: TRACK
     # ---- gcs_bridge ----
-    gcs_ip: 192.168.10.10
+    gcs_ips: ["192.168.10.10", "192.168.10.20"]   # Qt地面站 / 手机APP 多端并行
     gcs_port: 14555

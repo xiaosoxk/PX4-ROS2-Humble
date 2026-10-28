@@ -25,14 +25,14 @@ STM32H743 飞控（PX4，硬实时域）+ Jetson Orin NX 机载计算机（ROS2 
 |---|---|
 | `firmware/px4_modules/ai_gateway/` | PX4 外部模块（C，飞控侧守护，R1~R5 裁决规则） |
 | `ros2_ws/src/safety_arbiter/` | AI 控制权熔断器（C++，心跳审计+指令清洗+POSCTL 回退） |
-| `ros2_ws/src/perception/` | YOLOv8s INT8 检测 / IoU 跟踪 / 语义避障栅格 |
-| `ros2_ws/src/navigation/` | 智能跟随（follow_me），planner_bridge 接 EGO-Planner |
+| `ros2_ws/src/perception/` | YOLOv8s INT8 检测 / IoU 跟踪 / 语义避障栅格 / obstacle_send（PX4 碰撞预防数据源） |
+| `ros2_ws/src/navigation/` | 智能跟随 / planner_bridge（全局航点+Octomap+EGO-Planner） / vins_bridge（无GPS视觉惯导） |
 | `ros2_ws/src/gimbal/` | 三轴 FOC 云台：LOCK/FOLLOW/TRACK 三模式+振动抑制 |
 | `ros2_ws/src/cine_ai/` | 大师镜头状态机（冲天/渐远/环绕/俯拍） |
 | `ros2_ws/src/health/` | 电机/传感器故障在线诊断 |
 | `ros2_ws/src/ground_link/` | OSD 叠加 + 遥测聚合 UDP 桥 |
 | `ros2_ws/src/bringup/` | 总启动文件 + 全局参数 |
-| `ground_station/` | Qt 地面站：视频/遥测/轨迹/任务编辑 |
+| `ground_station/` | Qt 地面站 + **Web 网页地面站**（视频/识别框/三维地图/任务/参数/日志）+ 多端接入（手机APP 同协议） |
 | `ai_training/` | YOLOv8 训练 + ONNX→TensorRT INT8 导出 + 数据集规范 |
 | `tools/` | 延迟基准 / MAVLink 回环模拟器 / INT8 校准器 |
 | `scripts/` | 编译 / PX4 SITL 仿真 / Orin 部署 |
@@ -76,6 +76,16 @@ make px4_fmu-v5_default EXTERNAL_MODULES_LOCATION=$PWD/firmware/px4_modules/ai_g
 | AI 崩溃恢复 | ≤ 500 ms 自动切定点 | 【待测】 |
 | 跟随距离误差 | ±1.5 m @8 m 跟随 | 【待测】 |
 | RTK 定位 | 水平 ≤ 5 cm | 【待测】 |
+
+## 多端接入与 Web 地面站
+
+```bash
+python3 ground_station/web_gcs/server.py --http 8000 --tele 14555 --video 14556
+# 浏览器（手机/平板同地址）: 视频 + 识别框 + 三维地图(Octomap/轨迹/航点) + 任务编辑 + 参数调参 + 日志列表
+```
+Qt 地面站、手机 APP、Web 端共用 gcs_bridge 的 20Hz 遥测 JSON 广播（gcs_ips 多端并行），
+APP 侧另可用 MAVLink 直连（mavlink_router 分流）。H.265 编码走 NVENC 硬件单元，
+OSD 叠加 <3ms，自动曝光由 IMX415 ISP 3A 完成，EIS 预留参数（默认关，云台机械增稳为主）。
 
 ## 安全声明
 

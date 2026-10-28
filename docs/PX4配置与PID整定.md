@@ -41,3 +41,27 @@
 | MC_RATE_R_D | 0.003 | 【填】 | |
 | MC_ROLL_P | 6.5 | 【填】 | |
 | MPC_XY_VEL_P_ACC | 1.8 | 【填】 | |
+
+## 5. 障碍物制动（PX4 Collision Prevention）
+| 参数 | 值 | 说明 |
+|---|---|---|
+| CP_DIST | 2.5m | 最小安全距离（与 obstacle_send.py 的 cp_dist_m 一致） |
+| CP_DELAY | 0.4s | 制动延迟补偿 |
+| CP_GO_NO_DATA | 0 | 无数据方向不制动（五向感知覆盖不到的盲区） |
+| MPC_COL_?D | 默认 | 碰撞预防速度限幅 |
+数据源：perception/obstacle_send.py 把五向双目+激光压成 OBSTACLE_DISTANCE
+@10Hz 发 /mavros/obstacle/send。位置模式下飞控位置环直接制动——
+**属于飞控域兜底**，与 AI 层 semantic_nav 的绕行互补：AI 全挂，制动仍在。
+
+## 6. 无 GPS 环境外部导航（VINS-Fusion）
+| 参数 | 值 | 说明 |
+|---|---|---|
+| EKF2_EV_CTRL | 15 (水平+垂直+偏航) | 视觉里程计融合位开关 |
+| EKF2_GPS_CTRL | 0 | 无 GPS 场景关闭 GPS 融合 |
+| EKF2_HGT_REF | 3 (vision) | 高度参考切视觉 |
+| EKF2_EV_DELAY | 按 vins_bridge 实测 | 视觉延迟补偿 |
+| MAV_1_FLOW_CTRL | 42 | MAVROS odometry/out → ODOMETRY 消息 |
+链路：vins_bridge.py 把 VINS-Fusion 里程计（yaw 对齐磁北）发
+/mavros/odometry/out；节点内置与气压高度的相对漂移监控，
+漂移超 3m 自报故障 → arbiter 熔断 AI 链，EKF3 退气压+光流悬停。
+GPS 恢复 Fixed 后按 §1 参数切回。

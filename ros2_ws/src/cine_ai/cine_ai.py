@@ -10,6 +10,7 @@ import math
 import rclpy
 from rclpy.node import Node
 from ai_msgs.msg import TrackTarget, AiCommand, AiHealth
+from std_msgs.msg import Empty, Float32MultiArray
 
 
 class CineAi(Node):
@@ -20,13 +21,23 @@ class CineAi(Node):
         super().__init__("cine_ai")
         self.declare_parameter("orbit_radius", 10.0)
         self.declare_parameter("orbit_speed_dps", 20.0)
+        self.declare_parameter("timelapse_interval_s", 5.0)
+        self.declare_parameter("compose_enable", True)     # 自动构图: 主体上三分线
         self.running = False
+        self.timelapse = False
+        self.last_capture = 0.0
         self.idx = 0
         self.t0 = self.get_clock().now()
         self.orbit_dir = 1.0
+        self.target = None
         self.sub_t = self.create_subscription(TrackTarget, "/ai/track_target", self.on_track, 10)
         self.pub = self.create_publisher(AiCommand, "/ai/command", 5)
         self.pub_h = self.create_publisher(AiHealth, "/ai/health", 10)
+        # 延时摄影快门触发 + 构图偏移(给 gimbal_ctrl 叠加)
+        self.pub_cap = self.create_publisher(Empty, "/ai/capture_trigger", 10)
+        self.pub_cmp = self.create_publisher(Float32MultiArray, "/ai/compose_offset", 10)
+        self.create_subscription(Empty, "/ai/timelapse_start", lambda m: self.start_timelapse(), 10)
+        self.create_subscription(Empty, "/ai/timelapse_stop", lambda m: self.stop_timelapse(), 10)
         self.create_timer(0.2, self.tick)
 
     def start(self):
@@ -35,8 +46,26 @@ class CineAi(Node):
         self.t0 = self.get_clock().now()
         self.get_logger().info("MasterShot sequence started")
 
+    def start_timelapse(self):
+        self.timelapse, self.last_capture = True, 0.0
+        self.get_logger().info("timelapse mode: hover + interval capture")
+
+    def stop_timelapse(self):
+        self.timelapse = False
+
     def on_track(self, t: TrackTarget):
         self.target = t
+
+    def compose(self):
+        """自动构图: 主体从画面中心偏到上三分线交点(水平 1/3, 垂直 1/3)
+        云台水平 FOV 90°/垂直 60° → 偏移 = ±FOV/6; 主体在左半画面则往右偏"""
+        if not self.get_parameter("compose_enable").value or self.target is None:
+            self.pub_cmp.publish(Float32MultiArray(data=[0.0, 0.0]))
+            return
+        fov_h, fov_v = 90.0, 60.0
+        yaw_off = -fov_h / 6.0 if self.target.bearing_deg > 0 else fov_h / 6.0
+        pitch_off = fov_v / 12.0                            # 主体略放低, 天空留白
+        self.pub_cmp.publish(Float32MultiArray(data=[yaw_off, pitch_off]))
 
     def tick(self):
         h = AiHealth()
@@ -46,8 +75,19 @@ class CineAi(Node):
         h.state = 0
         self.pub_h.publish(h)
 
-        if not self.running:
+        # ---- 延时摄影模式：定点悬停 + 间隔快门（与大师镜头互斥） ----
+        if self.timelapse:
+            self.pub.publish(self.zero_cmd())               # 位置保持
+            now = self.get_clock().now().nanoseconds * 1e-9
+            if now - self.last_capture >= self.get_parameter("timelapse_interval_s").value:
+                self.last_capture = now
+                self.pub_cap.publish(Empty())               # 相机节点订阅此话题拍帧
             return
+
+        if not self.running:
+            self.compose()                                  # 非运镜时也持续构图
+            return
+        self.compose()
         elapsed = (self.get_clock().now() - self.t0).nanoseconds * 1e-9
         phase = self.SEQUENCE[self.idx]
         if elapsed > self.DURATION[phase]:

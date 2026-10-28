@@ -24,13 +24,19 @@ def gen():
         py("perception", "detector.py", "detector"),
         py("perception", "tracker.py", "tracker"),
         py("perception", "semantic_nav.py", "semantic_nav"),
-        # 4) 导航/任务
+        # 4) 导航/任务（全局航点+EGO-Planner桥 / 智能跟随 / 无GPS视觉惯导）
+        py("navigation", "planner_bridge.py", "planner_bridge"),
         py("navigation", "follow_me.py", "follow_me"),
+        py("navigation", "vins_bridge.py", "vins_bridge"),
+        # 4b) PX4 碰撞预防数据源（障碍物制动, 飞控域兜底）
+        py("perception", "obstacle_send.py", "obstacle_send"),
         # 5) 云台 + 健康诊断 + 地面链路
         py("gimbal", "gimbal_ctrl.py", "gimbal_ctrl"),
         py("health", "health_diag.py", "health_diag"),
         py("ground_link", "osd_overlay.py", "osd_overlay"),
         py("ground_link", "gcs_bridge.py", "gcs_bridge"),
+        py("ground_link", "video_encoder.py", "video_encoder"),   # H.265 NVENC
+        py("reconstruction", "capture_node.py", "capture_node"),   # 三维重建采集(可选)
     ])
 
 def generate_launch_description():

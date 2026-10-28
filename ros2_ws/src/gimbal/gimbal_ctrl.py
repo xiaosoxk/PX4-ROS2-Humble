@@ -15,6 +15,7 @@ import rclpy
 from rclpy.node import Node
 from ai_msgs.msg import TrackTarget
 from sensor_msgs.msg import Imu
+from std_msgs.msg import Float32MultiArray
 
 
 class GimbalCtrl(Node):
@@ -38,6 +39,10 @@ class GimbalCtrl(Node):
                                                   self.on_track, 10)
         self.sub_imu = self.create_subscription(Imu, "/mavros/imu/data",
                                                 self.on_imu, 10)
+        # 自动构图偏移（cine_ai 发布, [yaw_off, pitch_off] 度）
+        self.compose = [0.0, 0.0]
+        self.create_subscription(Float32MultiArray, "/ai/compose_offset",
+                                 lambda m: setattr(self, "compose", list(m.data)), 10)
         self.create_timer(0.01, self.tick)                 # 100Hz 指令下发（远低于 2kHz 内环）
 
     def on_imu(self, imu):
@@ -71,8 +76,8 @@ class GimbalCtrl(Node):
             yaw_cmd = self.yaw_body                        # 跟随机身
         else:  # TRACK
             yaw_cmd = self.gimbal_yaw
-        pitch = self.notch_lpf("pitch", self.target_pitch)
-        yaw = self.notch_lpf("yaw", yaw_cmd)
+        pitch = self.notch_lpf("pitch", self.target_pitch + self.compose[1])
+        yaw = self.notch_lpf("yaw", yaw_cmd + self.compose[0])
         # 帧格式: AA 55 | mode(1) | yaw_fp16 | pitch_fp16 | crc8 —— 见云台 MCU 仓库
         import struct
         frame = struct.pack("<BBffB", 0xAA, 0x55,
