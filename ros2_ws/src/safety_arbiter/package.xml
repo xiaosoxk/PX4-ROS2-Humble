@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>safety_arbiter</name>
+  <version>1.0.0</version>
+  <description>AI control fusing arbiter: heartbeat/latency audit, command sanitize, POSCTL fallback</description>
+  <maintainer email="dev@todo.todo">uav</maintainer>
+  <license>MIT</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>rclcpp</depend>
+  <depend>mavros_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>ai_msgs</depend>
+  <export><build_type>ament_cmake</build_type></export>
+</package>

@@ -1,0 +1,24 @@
+# 全局参数（各节点 declare_parameter 的默认值在此统一覆盖）
+/**:
+  ros__parameters:
+    # ---- safety_arbiter ----
+    ai_timeout_s: 0.5          # AI 指令流静默阈值
+    max_vh: 10.0               # 水平速度限幅 m/s
+    max_vz: 3.0
+    max_yaw_rate_dps: 60.0
+    max_latency_ms: 180.0      # 端到端 AI 延迟红线
+    min_battery: 0.20
+    critical_nodes: [detector, tracker, semantic_nav]
+    # ---- detector ----
+    engine: /opt/models/yolov8s_int8.engine
+    conf_thres: 0.45
+    input_hz: 20.0
+    # ---- follow_me ----
+    target_distance: 8.0
+    min_distance: 5.0
+    # ---- gimbal ----
+    port: /dev/ttyTHS1
+    mode: TRACK
+    # ---- gcs_bridge ----
+    gcs_ip: 192.168.10.10
+    gcs_port: 14555

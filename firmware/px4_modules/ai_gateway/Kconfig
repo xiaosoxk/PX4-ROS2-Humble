@@ -1,0 +1,6 @@
+menuconfig MODULES_AI_GATEWAY
+	bool "ai_gateway"
+	default n
+	---help---
+	AI companion gateway: sanitizes offboard setpoints from Jetson Orin NX.
+	Enforces stream-timeout / tilt / geofence / battery revocation rules.
